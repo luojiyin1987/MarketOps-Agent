@@ -81,6 +81,23 @@ Change detection is idempotent. Each current snapshot can have at most one persi
 
 The current diff is deliberately small and deterministic: it removes the common line prefix and suffix, then records the changed middle region with `-` and `+` lines. A richer diff algorithm can replace this later without involving an LLM.
 
+Analyze a deterministic change into a structured finding with DeepSeek:
+
+```bash
+export DEEPSEEK_API_KEY=<your-key>
+# Optional; defaults to deepseek-v4-flash
+export DEEPSEEK_MODEL=deepseek-v4-flash
+# Optional; defaults to https://api.deepseek.com
+export DEEPSEEK_BASE_URL=https://api.deepseek.com
+
+pnpm dev -- finding analyze --change <change-id>
+pnpm dev -- finding list --competitor <competitor-id>
+```
+
+The DeepSeek adapter uses JSON Output and validates the returned object again with Zod before any `Finding` is persisted. Source diffs are treated as untrusted evidence in the prompt and are never treated as instructions. The first classification path explicitly disables model thinking to keep routine monitoring latency and cost bounded; the model and base URL remain configurable.
+
+Relevant findings are idempotent by `change_id`: rerunning analysis for a change that already produced a finding returns the persisted result without calling the model again. Irrelevant decisions are not persisted yet; analysis-state tracking belongs with the later research-run orchestration layer.
+
 Supported source types are `website`, `pricing`, `blog`, `github`, and `rss`.
 
 Persistence is accessed through repository interfaces. SQLite is the first implementation rather than a domain dependency, so a later move to PostgreSQL does not require rewriting the domain or CLI workflow.
@@ -102,7 +119,7 @@ Near-term milestones:
 1. Persist competitors and sources. ✅
 2. Capture deduplicated source snapshots. ✅
 3. Detect deterministic changes between snapshots. ✅
-4. Analyze meaningful changes into validated findings.
+4. Analyze meaningful changes into validated findings. ✅
 5. Orchestrate an end-to-end research run.
 
 Distributed workers, richer action workflows, human approval, MCP, RAG, and a web UI are later concerns.

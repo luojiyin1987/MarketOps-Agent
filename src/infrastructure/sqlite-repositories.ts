@@ -1,16 +1,19 @@
 import type {
   ChangeRepository,
   CompetitorRepository,
+  FindingRepository,
   SnapshotRepository,
   SourceRepository,
 } from "../application/repositories.js";
 import {
   ChangeSchema,
   CompetitorSchema,
+  FindingSchema,
   SnapshotSchema,
   SourceSchema,
   type Change,
   type Competitor,
+  type Finding,
   type Snapshot,
   type Source,
 } from "../domain/index.js";
@@ -46,6 +49,18 @@ type ChangeRow = {
   current_snapshot_id: string;
   diff: string;
   detected_at: string;
+};
+
+type FindingRow = {
+  id: string;
+  competitor_id: string;
+  change_id: string;
+  type: Finding["type"];
+  severity: Finding["severity"];
+  summary: string;
+  impact: string;
+  confidence: number;
+  created_at: string;
 };
 
 function mapCompetitor(row: CompetitorRow): Competitor {
@@ -85,6 +100,20 @@ function mapChange(row: ChangeRow): Change {
     currentSnapshotId: row.current_snapshot_id,
     diff: row.diff,
     detectedAt: new Date(row.detected_at),
+  });
+}
+
+function mapFinding(row: FindingRow): Finding {
+  return FindingSchema.parse({
+    id: row.id,
+    competitorId: row.competitor_id,
+    changeId: row.change_id,
+    type: row.type,
+    severity: row.severity,
+    summary: row.summary,
+    impact: row.impact,
+    confidence: row.confidence,
+    createdAt: new Date(row.created_at),
   });
 }
 
@@ -228,6 +257,17 @@ export class SqliteChangeRepository implements ChangeRepository {
       });
   }
 
+  findById(id: string): Change | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT id, source_id, previous_snapshot_id, current_snapshot_id, diff, detected_at
+         FROM changes
+         WHERE id = ?`,
+      )
+      .get(id) as ChangeRow | undefined;
+    return row === undefined ? undefined : mapChange(row);
+  }
+
   findByCurrentSnapshotId(currentSnapshotId: string): Change | undefined {
     const row = this.database
       .prepare(
@@ -249,5 +289,55 @@ export class SqliteChangeRepository implements ChangeRepository {
       )
       .all(sourceId) as ChangeRow[];
     return rows.map(mapChange);
+  }
+}
+
+export class SqliteFindingRepository implements FindingRepository {
+  constructor(private readonly database: SqliteDatabase) {}
+
+  create(finding: Finding): void {
+    const value = FindingSchema.parse(finding);
+    this.database
+      .prepare(
+        `INSERT INTO findings (
+           id, competitor_id, change_id, type, severity, summary, impact, confidence, created_at
+         ) VALUES (
+           @id, @competitorId, @changeId, @type, @severity, @summary, @impact, @confidence, @createdAt
+         )`,
+      )
+      .run({
+        id: value.id,
+        competitorId: value.competitorId,
+        changeId: value.changeId,
+        type: value.type,
+        severity: value.severity,
+        summary: value.summary,
+        impact: value.impact,
+        confidence: value.confidence,
+        createdAt: value.createdAt.toISOString(),
+      });
+  }
+
+  findByChangeId(changeId: string): Finding | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT id, competitor_id, change_id, type, severity, summary, impact, confidence, created_at
+         FROM findings
+         WHERE change_id = ?`,
+      )
+      .get(changeId) as FindingRow | undefined;
+    return row === undefined ? undefined : mapFinding(row);
+  }
+
+  listByCompetitor(competitorId: string): Finding[] {
+    const rows = this.database
+      .prepare(
+        `SELECT id, competitor_id, change_id, type, severity, summary, impact, confidence, created_at
+         FROM findings
+         WHERE competitor_id = ?
+         ORDER BY created_at, id`,
+      )
+      .all(competitorId) as FindingRow[];
+    return rows.map(mapFinding);
   }
 }
