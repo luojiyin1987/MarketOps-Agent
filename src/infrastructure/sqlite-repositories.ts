@@ -1,8 +1,14 @@
-import type { CompetitorRepository, SourceRepository } from "../application/repositories.js";
+import type {
+  CompetitorRepository,
+  SnapshotRepository,
+  SourceRepository,
+} from "../application/repositories.js";
 import {
   CompetitorSchema,
+  SnapshotSchema,
   SourceSchema,
   type Competitor,
+  type Snapshot,
   type Source,
 } from "../domain/index.js";
 import type { SqliteDatabase } from "./sqlite.js";
@@ -22,6 +28,14 @@ type SourceRow = {
   created_at: string;
 };
 
+type SnapshotRow = {
+  id: string;
+  source_id: string;
+  content: string;
+  content_hash: string;
+  fetched_at: string;
+};
+
 function mapCompetitor(row: CompetitorRow): Competitor {
   return CompetitorSchema.parse({
     id: row.id,
@@ -38,6 +52,16 @@ function mapSource(row: SourceRow): Source {
     type: row.type,
     url: row.url,
     createdAt: new Date(row.created_at),
+  });
+}
+
+function mapSnapshot(row: SnapshotRow): Snapshot {
+  return SnapshotSchema.parse({
+    id: row.id,
+    sourceId: row.source_id,
+    content: row.content,
+    contentHash: row.content_hash,
+    fetchedAt: new Date(row.fetched_at),
   });
 }
 
@@ -110,5 +134,50 @@ export class SqliteSourceRepository implements SourceRepository {
       )
       .all(competitorId) as SourceRow[];
     return rows.map(mapSource);
+  }
+}
+
+export class SqliteSnapshotRepository implements SnapshotRepository {
+  constructor(private readonly database: SqliteDatabase) {}
+
+  create(snapshot: Snapshot): void {
+    const value = SnapshotSchema.parse(snapshot);
+    this.database
+      .prepare(
+        `INSERT INTO snapshots (id, source_id, content, content_hash, fetched_at)
+         VALUES (@id, @sourceId, @content, @contentHash, @fetchedAt)`,
+      )
+      .run({
+        id: value.id,
+        sourceId: value.sourceId,
+        content: value.content,
+        contentHash: value.contentHash,
+        fetchedAt: value.fetchedAt.toISOString(),
+      });
+  }
+
+  findLatestBySource(sourceId: string): Snapshot | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT id, source_id, content, content_hash, fetched_at
+         FROM snapshots
+         WHERE source_id = ?
+         ORDER BY fetched_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(sourceId) as SnapshotRow | undefined;
+    return row === undefined ? undefined : mapSnapshot(row);
+  }
+
+  listBySource(sourceId: string): Snapshot[] {
+    const rows = this.database
+      .prepare(
+        `SELECT id, source_id, content, content_hash, fetched_at
+         FROM snapshots
+         WHERE source_id = ?
+         ORDER BY fetched_at, id`,
+      )
+      .all(sourceId) as SnapshotRow[];
+    return rows.map(mapSnapshot);
   }
 }

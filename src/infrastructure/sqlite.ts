@@ -22,6 +22,18 @@ CREATE TABLE IF NOT EXISTS sources (
 
 CREATE INDEX IF NOT EXISTS idx_sources_competitor_id
   ON sources(competitor_id);
+
+CREATE TABLE IF NOT EXISTS snapshots (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  fetched_at TEXT NOT NULL,
+  FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshots_source_fetched_at
+  ON snapshots(source_id, fetched_at DESC, id DESC);
 `;
 
 export function openSqliteDatabase(path = "marketops.db"): SqliteDatabase {

@@ -59,6 +59,17 @@ pnpm dev -- source add \
 pnpm dev -- source list --competitor <competitor-id>
 ```
 
+Capture and inspect versioned source snapshots:
+
+```bash
+pnpm dev -- snapshot capture --source <source-id>
+pnpm dev -- snapshot list --source <source-id>
+```
+
+Snapshot capture uses Node's HTTP fetch, normalizes line endings and trailing whitespace, and stores a SHA-256 hash with the normalized content. A capture whose hash matches the immediately previous snapshot is reported as `unchanged` and does not create another row.
+
+Deduplication is intentionally based only on the latest snapshot. If a source changes `A -> B -> A`, the second `A` is stored because the return to earlier content is itself an observed change.
+
 Supported source types are `website`, `pricing`, `blog`, `github`, and `rss`.
 
 Persistence is accessed through repository interfaces. SQLite is the first implementation rather than a domain dependency, so a later move to PostgreSQL does not require rewriting the domain or CLI workflow.
@@ -78,7 +89,7 @@ competitor
 Near-term milestones:
 
 1. Persist competitors and sources. ✅
-2. Capture deduplicated source snapshots.
+2. Capture deduplicated source snapshots. ✅
 3. Detect deterministic changes between snapshots.
 4. Analyze meaningful changes into validated findings.
 5. Orchestrate an end-to-end research run.
