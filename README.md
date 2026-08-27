@@ -70,6 +70,17 @@ Snapshot capture uses Node's HTTP fetch, normalizes line endings and trailing wh
 
 Deduplication is intentionally based only on the latest snapshot. If a source changes `A -> B -> A`, the second `A` is stored because the return to earlier content is itself an observed change.
 
+Detect and inspect deterministic changes between adjacent snapshots:
+
+```bash
+pnpm dev -- change detect --source <source-id>
+pnpm dev -- change list --source <source-id>
+```
+
+Change detection is idempotent. Each current snapshot can have at most one persisted `Change`, so rerunning detection reports existing changes instead of duplicating them. A reversion such as `A -> B -> A` still produces two changes because each transition ends at a different snapshot.
+
+The current diff is deliberately small and deterministic: it removes the common line prefix and suffix, then records the changed middle region with `-` and `+` lines. A richer diff algorithm can replace this later without involving an LLM.
+
 Supported source types are `website`, `pricing`, `blog`, `github`, and `rss`.
 
 Persistence is accessed through repository interfaces. SQLite is the first implementation rather than a domain dependency, so a later move to PostgreSQL does not require rewriting the domain or CLI workflow.
@@ -90,7 +101,7 @@ Near-term milestones:
 
 1. Persist competitors and sources. ✅
 2. Capture deduplicated source snapshots. ✅
-3. Detect deterministic changes between snapshots.
+3. Detect deterministic changes between snapshots. ✅
 4. Analyze meaningful changes into validated findings.
 5. Orchestrate an end-to-end research run.
 

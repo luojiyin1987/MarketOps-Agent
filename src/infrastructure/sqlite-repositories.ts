@@ -1,12 +1,15 @@
 import type {
+  ChangeRepository,
   CompetitorRepository,
   SnapshotRepository,
   SourceRepository,
 } from "../application/repositories.js";
 import {
+  ChangeSchema,
   CompetitorSchema,
   SnapshotSchema,
   SourceSchema,
+  type Change,
   type Competitor,
   type Snapshot,
   type Source,
@@ -36,6 +39,15 @@ type SnapshotRow = {
   fetched_at: string;
 };
 
+type ChangeRow = {
+  id: string;
+  source_id: string;
+  previous_snapshot_id: string;
+  current_snapshot_id: string;
+  diff: string;
+  detected_at: string;
+};
+
 function mapCompetitor(row: CompetitorRow): Competitor {
   return CompetitorSchema.parse({
     id: row.id,
@@ -62,6 +74,17 @@ function mapSnapshot(row: SnapshotRow): Snapshot {
     content: row.content,
     contentHash: row.content_hash,
     fetchedAt: new Date(row.fetched_at),
+  });
+}
+
+function mapChange(row: ChangeRow): Change {
+  return ChangeSchema.parse({
+    id: row.id,
+    sourceId: row.source_id,
+    previousSnapshotId: row.previous_snapshot_id,
+    currentSnapshotId: row.current_snapshot_id,
+    diff: row.diff,
+    detectedAt: new Date(row.detected_at),
   });
 }
 
@@ -179,5 +202,52 @@ export class SqliteSnapshotRepository implements SnapshotRepository {
       )
       .all(sourceId) as SnapshotRow[];
     return rows.map(mapSnapshot);
+  }
+}
+
+export class SqliteChangeRepository implements ChangeRepository {
+  constructor(private readonly database: SqliteDatabase) {}
+
+  create(change: Change): void {
+    const value = ChangeSchema.parse(change);
+    this.database
+      .prepare(
+        `INSERT INTO changes (
+           id, source_id, previous_snapshot_id, current_snapshot_id, diff, detected_at
+         ) VALUES (
+           @id, @sourceId, @previousSnapshotId, @currentSnapshotId, @diff, @detectedAt
+         )`,
+      )
+      .run({
+        id: value.id,
+        sourceId: value.sourceId,
+        previousSnapshotId: value.previousSnapshotId,
+        currentSnapshotId: value.currentSnapshotId,
+        diff: value.diff,
+        detectedAt: value.detectedAt.toISOString(),
+      });
+  }
+
+  findByCurrentSnapshotId(currentSnapshotId: string): Change | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT id, source_id, previous_snapshot_id, current_snapshot_id, diff, detected_at
+         FROM changes
+         WHERE current_snapshot_id = ?`,
+      )
+      .get(currentSnapshotId) as ChangeRow | undefined;
+    return row === undefined ? undefined : mapChange(row);
+  }
+
+  listBySource(sourceId: string): Change[] {
+    const rows = this.database
+      .prepare(
+        `SELECT id, source_id, previous_snapshot_id, current_snapshot_id, diff, detected_at
+         FROM changes
+         WHERE source_id = ?
+         ORDER BY detected_at, id`,
+      )
+      .all(sourceId) as ChangeRow[];
+    return rows.map(mapChange);
   }
 }
