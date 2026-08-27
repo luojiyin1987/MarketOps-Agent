@@ -34,6 +34,22 @@ CREATE TABLE IF NOT EXISTS snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_source_fetched_at
   ON snapshots(source_id, fetched_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS changes (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL,
+  previous_snapshot_id TEXT NOT NULL,
+  current_snapshot_id TEXT NOT NULL UNIQUE,
+  diff TEXT NOT NULL,
+  detected_at TEXT NOT NULL,
+  FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
+  FOREIGN KEY (previous_snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE,
+  FOREIGN KEY (current_snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE,
+  CHECK (previous_snapshot_id <> current_snapshot_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_changes_source_detected_at
+  ON changes(source_id, detected_at, id);
 `;
 
 export function openSqliteDatabase(path = "marketops.db"): SqliteDatabase {

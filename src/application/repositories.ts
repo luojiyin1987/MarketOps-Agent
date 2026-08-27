@@ -1,4 +1,4 @@
-import type { Competitor, Snapshot, Source } from "../domain/index.js";
+import type { Change, Competitor, Snapshot, Source } from "../domain/index.js";
 
 export interface CompetitorRepository {
   create(competitor: Competitor): void;
@@ -16,4 +16,10 @@ export interface SnapshotRepository {
   create(snapshot: Snapshot): void;
   findLatestBySource(sourceId: string): Snapshot | undefined;
   listBySource(sourceId: string): Snapshot[];
+}
+
+export interface ChangeRepository {
+  create(change: Change): void;
+  findByCurrentSnapshotId(currentSnapshotId: string): Change | undefined;
+  listBySource(sourceId: string): Change[];
 }

@@ -2,9 +2,11 @@
 
 import { randomUUID } from "node:crypto";
 import { captureSourceSnapshot } from "../application/capture-source-snapshot.js";
+import { detectSourceChanges } from "../application/detect-source-changes.js";
 import { SourceTypeSchema } from "../domain/source.js";
 import { HttpSourceFetcher } from "../infrastructure/http-source-fetcher.js";
 import {
+  SqliteChangeRepository,
   SqliteCompetitorRepository,
   SqliteSnapshotRepository,
   SqliteSourceRepository,
@@ -23,6 +25,8 @@ Usage:
   marketops source list --competitor <id>
   marketops snapshot capture --source <id>
   marketops snapshot list --source <id>
+  marketops change detect --source <id>
+  marketops change list --source <id>
 
 Source types: website, pricing, blog, github, rss
 `;
@@ -47,6 +51,7 @@ async function main(args: string[]): Promise<void> {
   const competitors = new SqliteCompetitorRepository(database);
   const sources = new SqliteSourceRepository(database);
   const snapshots = new SqliteSnapshotRepository(database);
+  const changes = new SqliteChangeRepository(database);
 
   try {
     const [resource, action, ...options] = args;
@@ -110,6 +115,30 @@ async function main(args: string[]): Promise<void> {
         process.stdout.write(
           `${snapshot.id}\t${snapshot.contentHash}\t${snapshot.fetchedAt.toISOString()}\n`,
         );
+      }
+      return;
+    }
+
+    if (resource === "change" && action === "detect") {
+      const sourceId = readOption(options, "source");
+      const result = detectSourceChanges(sourceId, {
+        sourceRepository: sources,
+        snapshotRepository: snapshots,
+        changeRepository: changes,
+      });
+      process.stdout.write(`created\t${result.created.length}\n`);
+      process.stdout.write(`existing\t${result.existing.length}\n`);
+      process.stdout.write(`unchanged\t${result.skippedUnchangedPairs}\n`);
+      return;
+    }
+
+    if (resource === "change" && action === "list") {
+      const sourceId = readOption(options, "source");
+      for (const change of changes.listBySource(sourceId)) {
+        process.stdout.write(
+          `${change.id}\t${change.previousSnapshotId}\t${change.currentSnapshotId}\t${change.detectedAt.toISOString()}\n`,
+        );
+        process.stdout.write(`${change.diff}\n`);
       }
       return;
     }
