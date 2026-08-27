@@ -37,7 +37,31 @@ pnpm test
 pnpm dev -- --help
 ```
 
-SQLite is the initial persistence technology. The bootstrap only establishes the database adapter; repositories and schema migrations will be added with the first persistence feature.
+SQLite is the initial persistence technology. Set `MARKETOPS_DB` to override the default `marketops.db` path.
+
+## Current CLI
+
+Add and list competitors:
+
+```bash
+pnpm dev -- competitor add --name "Example AI" --website https://example.com
+pnpm dev -- competitor list
+```
+
+Use the returned competitor ID to add monitored sources:
+
+```bash
+pnpm dev -- source add \
+  --competitor <competitor-id> \
+  --type pricing \
+  --url https://example.com/pricing
+
+pnpm dev -- source list --competitor <competitor-id>
+```
+
+Supported source types are `website`, `pricing`, `blog`, `github`, and `rss`.
+
+Persistence is accessed through repository interfaces. SQLite is the first implementation rather than a domain dependency, so a later move to PostgreSQL does not require rewriting the domain or CLI workflow.
 
 ## Roadmap
 
@@ -53,7 +77,7 @@ competitor
 
 Near-term milestones:
 
-1. Persist competitors and sources.
+1. Persist competitors and sources. ✅
 2. Capture deduplicated source snapshots.
 3. Detect deterministic changes between snapshots.
 4. Analyze meaningful changes into validated findings.
