@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
+  ChangeAnalysisSchema,
   FindingSchema,
   FindingTypeSchema,
   SeveritySchema,
@@ -10,6 +11,7 @@ import {
   type Source,
 } from "../domain/index.js";
 import type {
+  ChangeAnalysisRepository,
   ChangeRepository,
   CompetitorRepository,
   FindingRepository,
@@ -49,6 +51,7 @@ interface AnalyzeChangeDependencies {
   sourceRepository: SourceRepository;
   competitorRepository: CompetitorRepository;
   findingRepository: FindingRepository;
+  changeAnalysisRepository?: ChangeAnalysisRepository;
   analyzer: FindingAnalyzer;
   createId?: () => string;
   now?: () => Date;
@@ -63,8 +66,36 @@ export async function analyzeChange(
   changeId: string,
   dependencies: AnalyzeChangeDependencies,
 ): Promise<AnalyzeChangeResult> {
+  const persistedAnalysis = dependencies.changeAnalysisRepository?.findByChangeId(changeId);
+  if (persistedAnalysis !== undefined) {
+    if (!persistedAnalysis.relevant) {
+      return {
+        status: "irrelevant",
+        analysis: {
+          relevant: false,
+          reason: persistedAnalysis.reason,
+          confidence: persistedAnalysis.confidence,
+        },
+      };
+    }
+
+    const persistedFinding = dependencies.findingRepository.findByChangeId(changeId);
+    if (persistedFinding === undefined) {
+      throw new Error(`Relevant analysis is missing its finding: ${changeId}`);
+    }
+    return { status: "existing", finding: persistedFinding };
+  }
+
   const existing = dependencies.findingRepository.findByChangeId(changeId);
   if (existing !== undefined) {
+    dependencies.changeAnalysisRepository?.create(
+      ChangeAnalysisSchema.parse({
+        changeId,
+        relevant: true,
+        confidence: existing.confidence,
+        analyzedAt: dependencies.now?.() ?? new Date(),
+      }),
+    );
     return { status: "existing", finding: existing };
   }
 
@@ -86,8 +117,18 @@ export async function analyzeChange(
   const analysis = FindingAnalysisSchema.parse(
     await dependencies.analyzer.analyze({ competitor, source, change }),
   );
+  const analyzedAt = dependencies.now?.() ?? new Date();
 
   if (!analysis.relevant) {
+    dependencies.changeAnalysisRepository?.create(
+      ChangeAnalysisSchema.parse({
+        changeId: change.id,
+        relevant: false,
+        reason: analysis.reason,
+        confidence: analysis.confidence,
+        analyzedAt,
+      }),
+    );
     return { status: "irrelevant", analysis };
   }
 
@@ -100,9 +141,17 @@ export async function analyzeChange(
     summary: analysis.summary,
     impact: analysis.impact,
     confidence: analysis.confidence,
-    createdAt: dependencies.now?.() ?? new Date(),
+    createdAt: analyzedAt,
   });
 
   dependencies.findingRepository.create(finding);
+  dependencies.changeAnalysisRepository?.create(
+    ChangeAnalysisSchema.parse({
+      changeId: change.id,
+      relevant: true,
+      confidence: analysis.confidence,
+      analyzedAt,
+    }),
+  );
   return { status: "created", finding };
 }

@@ -1,19 +1,25 @@
 import type {
+  ChangeAnalysisRepository,
   ChangeRepository,
   CompetitorRepository,
   FindingRepository,
+  ResearchRunRepository,
   SnapshotRepository,
   SourceRepository,
 } from "../application/repositories.js";
 import {
+  ChangeAnalysisSchema,
   ChangeSchema,
   CompetitorSchema,
   FindingSchema,
+  ResearchRunSchema,
   SnapshotSchema,
   SourceSchema,
   type Change,
+  type ChangeAnalysis,
   type Competitor,
   type Finding,
+  type ResearchRun,
   type Snapshot,
   type Source,
 } from "../domain/index.js";
@@ -60,6 +66,23 @@ type FindingRow = {
   summary: string;
   impact: string;
   confidence: number;
+  created_at: string;
+};
+
+type ChangeAnalysisRow = {
+  change_id: string;
+  relevant: 0 | 1;
+  reason: string | null;
+  confidence: number;
+  analyzed_at: string;
+};
+
+type ResearchRunRow = {
+  id: string;
+  competitor_id: string;
+  status: ResearchRun["status"];
+  started_at: string | null;
+  completed_at: string | null;
   created_at: string;
 };
 
@@ -113,6 +136,36 @@ function mapFinding(row: FindingRow): Finding {
     summary: row.summary,
     impact: row.impact,
     confidence: row.confidence,
+    createdAt: new Date(row.created_at),
+  });
+}
+
+function mapChangeAnalysis(row: ChangeAnalysisRow): ChangeAnalysis {
+  return ChangeAnalysisSchema.parse(
+    row.relevant === 1
+      ? {
+          changeId: row.change_id,
+          relevant: true,
+          confidence: row.confidence,
+          analyzedAt: new Date(row.analyzed_at),
+        }
+      : {
+          changeId: row.change_id,
+          relevant: false,
+          reason: row.reason,
+          confidence: row.confidence,
+          analyzedAt: new Date(row.analyzed_at),
+        },
+  );
+}
+
+function mapResearchRun(row: ResearchRunRow): ResearchRun {
+  return ResearchRunSchema.parse({
+    id: row.id,
+    competitorId: row.competitor_id,
+    status: row.status,
+    startedAt: row.started_at === null ? null : new Date(row.started_at),
+    completedAt: row.completed_at === null ? null : new Date(row.completed_at),
     createdAt: new Date(row.created_at),
   });
 }
@@ -339,5 +392,102 @@ export class SqliteFindingRepository implements FindingRepository {
       )
       .all(competitorId) as FindingRow[];
     return rows.map(mapFinding);
+  }
+}
+
+export class SqliteChangeAnalysisRepository implements ChangeAnalysisRepository {
+  constructor(private readonly database: SqliteDatabase) {}
+
+  create(analysis: ChangeAnalysis): void {
+    const value = ChangeAnalysisSchema.parse(analysis);
+    this.database
+      .prepare(
+        `INSERT INTO change_analyses (change_id, relevant, reason, confidence, analyzed_at)
+         VALUES (@changeId, @relevant, @reason, @confidence, @analyzedAt)`,
+      )
+      .run({
+        changeId: value.changeId,
+        relevant: value.relevant ? 1 : 0,
+        reason: value.relevant ? null : value.reason,
+        confidence: value.confidence,
+        analyzedAt: value.analyzedAt.toISOString(),
+      });
+  }
+
+  findByChangeId(changeId: string): ChangeAnalysis | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT change_id, relevant, reason, confidence, analyzed_at
+         FROM change_analyses
+         WHERE change_id = ?`,
+      )
+      .get(changeId) as ChangeAnalysisRow | undefined;
+    return row === undefined ? undefined : mapChangeAnalysis(row);
+  }
+}
+
+export class SqliteResearchRunRepository implements ResearchRunRepository {
+  constructor(private readonly database: SqliteDatabase) {}
+
+  create(run: ResearchRun): void {
+    const value = ResearchRunSchema.parse(run);
+    this.database
+      .prepare(
+        `INSERT INTO research_runs (
+           id, competitor_id, status, started_at, completed_at, created_at
+         ) VALUES (
+           @id, @competitorId, @status, @startedAt, @completedAt, @createdAt
+         )`,
+      )
+      .run({
+        id: value.id,
+        competitorId: value.competitorId,
+        status: value.status,
+        startedAt: value.startedAt?.toISOString() ?? null,
+        completedAt: value.completedAt?.toISOString() ?? null,
+        createdAt: value.createdAt.toISOString(),
+      });
+  }
+
+  update(run: ResearchRun): void {
+    const value = ResearchRunSchema.parse(run);
+    const result = this.database
+      .prepare(
+        `UPDATE research_runs
+         SET status = @status, started_at = @startedAt, completed_at = @completedAt
+         WHERE id = @id`,
+      )
+      .run({
+        id: value.id,
+        status: value.status,
+        startedAt: value.startedAt?.toISOString() ?? null,
+        completedAt: value.completedAt?.toISOString() ?? null,
+      });
+    if (result.changes !== 1) {
+      throw new Error(`Unknown research run: ${value.id}`);
+    }
+  }
+
+  findById(id: string): ResearchRun | undefined {
+    const row = this.database
+      .prepare(
+        `SELECT id, competitor_id, status, started_at, completed_at, created_at
+         FROM research_runs
+         WHERE id = ?`,
+      )
+      .get(id) as ResearchRunRow | undefined;
+    return row === undefined ? undefined : mapResearchRun(row);
+  }
+
+  listByCompetitor(competitorId: string): ResearchRun[] {
+    const rows = this.database
+      .prepare(
+        `SELECT id, competitor_id, status, started_at, completed_at, created_at
+         FROM research_runs
+         WHERE competitor_id = ?
+         ORDER BY created_at, id`,
+      )
+      .all(competitorId) as ResearchRunRow[];
+    return rows.map(mapResearchRun);
   }
 }

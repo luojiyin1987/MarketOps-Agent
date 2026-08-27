@@ -1,3 +1,4 @@
+export * from "./change-analysis.js";
 export * from "./change.js";
 export * from "./competitor.js";
 export * from "./finding.js";
