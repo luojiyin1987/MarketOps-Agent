@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { captureSourceSnapshot } from "../application/capture-source-snapshot.js";
 import { SourceTypeSchema } from "../domain/source.js";
+import { HttpSourceFetcher } from "../infrastructure/http-source-fetcher.js";
 import {
   SqliteCompetitorRepository,
+  SqliteSnapshotRepository,
   SqliteSourceRepository,
 } from "../infrastructure/sqlite-repositories.js";
 import {
@@ -18,6 +21,8 @@ Usage:
   marketops competitor list
   marketops source add --competitor <id> --type <type> --url <url>
   marketops source list --competitor <id>
+  marketops snapshot capture --source <id>
+  marketops snapshot list --source <id>
 
 Source types: website, pricing, blog, github, rss
 `;
@@ -31,7 +36,7 @@ function readOption(args: string[], name: string): string {
   return value;
 }
 
-function main(args: string[]): void {
+async function main(args: string[]): Promise<void> {
   if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
     process.stdout.write(HELP);
     return;
@@ -41,6 +46,7 @@ function main(args: string[]): void {
   initializeSqliteDatabase(database);
   const competitors = new SqliteCompetitorRepository(database);
   const sources = new SqliteSourceRepository(database);
+  const snapshots = new SqliteSnapshotRepository(database);
 
   try {
     const [resource, action, ...options] = args;
@@ -85,16 +91,37 @@ function main(args: string[]): void {
       return;
     }
 
+    if (resource === "snapshot" && action === "capture") {
+      const sourceId = readOption(options, "source");
+      const result = await captureSourceSnapshot(sourceId, {
+        sourceRepository: sources,
+        snapshotRepository: snapshots,
+        fetcher: new HttpSourceFetcher(),
+      });
+      process.stdout.write(
+        `${result.status}\t${result.snapshot.id}\t${result.snapshot.contentHash}\t${result.snapshot.fetchedAt.toISOString()}\n`,
+      );
+      return;
+    }
+
+    if (resource === "snapshot" && action === "list") {
+      const sourceId = readOption(options, "source");
+      for (const snapshot of snapshots.listBySource(sourceId)) {
+        process.stdout.write(
+          `${snapshot.id}\t${snapshot.contentHash}\t${snapshot.fetchedAt.toISOString()}\n`,
+        );
+      }
+      return;
+    }
+
     throw new Error(`Unknown command: ${args.join(" ")}`);
   } finally {
     database.close();
   }
 }
 
-try {
-  main(process.argv.slice(2));
-} catch (error) {
+main(process.argv.slice(2)).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`${message}\n\n${HELP}`);
   process.exitCode = 1;
-}
+});
