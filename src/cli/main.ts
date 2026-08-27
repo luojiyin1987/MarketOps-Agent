@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { analyzeChange } from "../application/analyze-change.js";
 import { captureSourceSnapshot } from "../application/capture-source-snapshot.js";
 import { detectSourceChanges } from "../application/detect-source-changes.js";
 import { SourceTypeSchema } from "../domain/source.js";
+import { DeepSeekFindingAnalyzer } from "../infrastructure/deepseek-finding-analyzer.js";
 import { HttpSourceFetcher } from "../infrastructure/http-source-fetcher.js";
 import {
   SqliteChangeRepository,
   SqliteCompetitorRepository,
+  SqliteFindingRepository,
   SqliteSnapshotRepository,
   SqliteSourceRepository,
 } from "../infrastructure/sqlite-repositories.js";
@@ -27,6 +30,8 @@ Usage:
   marketops snapshot list --source <id>
   marketops change detect --source <id>
   marketops change list --source <id>
+  marketops finding analyze --change <id>
+  marketops finding list --competitor <id>
 
 Source types: website, pricing, blog, github, rss
 `;
@@ -36,6 +41,14 @@ function readOption(args: string[], name: string): string {
   const value = index === -1 ? undefined : args[index + 1];
   if (value === undefined || value.startsWith("--")) {
     throw new Error(`Missing required option --${name}`);
+  }
+  return value;
+}
+
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required environment variable ${name}`);
   }
   return value;
 }
@@ -52,6 +65,7 @@ async function main(args: string[]): Promise<void> {
   const sources = new SqliteSourceRepository(database);
   const snapshots = new SqliteSnapshotRepository(database);
   const changes = new SqliteChangeRepository(database);
+  const findings = new SqliteFindingRepository(database);
 
   try {
     const [resource, action, ...options] = args;
@@ -139,6 +153,46 @@ async function main(args: string[]): Promise<void> {
           `${change.id}\t${change.previousSnapshotId}\t${change.currentSnapshotId}\t${change.detectedAt.toISOString()}\n`,
         );
         process.stdout.write(`${change.diff}\n`);
+      }
+      return;
+    }
+
+    if (resource === "finding" && action === "analyze") {
+      const changeId = readOption(options, "change");
+      const analyzer = new DeepSeekFindingAnalyzer({
+        apiKey: requireEnv("DEEPSEEK_API_KEY"),
+        model: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
+        baseUrl: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
+      });
+      const result = await analyzeChange(changeId, {
+        changeRepository: changes,
+        sourceRepository: sources,
+        competitorRepository: competitors,
+        findingRepository: findings,
+        analyzer,
+      });
+
+      if (result.status === "irrelevant") {
+        process.stdout.write(
+          `irrelevant\t${result.analysis.confidence}\t${result.analysis.reason}\n`,
+        );
+        return;
+      }
+
+      process.stdout.write(
+        `${result.status}\t${result.finding.id}\t${result.finding.type}\t${result.finding.severity}\t${result.finding.confidence}\n`,
+      );
+      process.stdout.write(`${result.finding.summary}\n${result.finding.impact}\n`);
+      return;
+    }
+
+    if (resource === "finding" && action === "list") {
+      const competitorId = readOption(options, "competitor");
+      for (const finding of findings.listByCompetitor(competitorId)) {
+        process.stdout.write(
+          `${finding.id}\t${finding.changeId}\t${finding.type}\t${finding.severity}\t${finding.confidence}\t${finding.createdAt.toISOString()}\n`,
+        );
+        process.stdout.write(`${finding.summary}\n${finding.impact}\n`);
       }
       return;
     }
