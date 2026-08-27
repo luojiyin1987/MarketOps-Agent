@@ -4,13 +4,17 @@ import { randomUUID } from "node:crypto";
 import { analyzeChange } from "../application/analyze-change.js";
 import { captureSourceSnapshot } from "../application/capture-source-snapshot.js";
 import { detectSourceChanges } from "../application/detect-source-changes.js";
+import { runResearch } from "../application/run-research.js";
+import { loadOptionalEnvFile } from "../config/load-env.js";
 import { SourceTypeSchema } from "../domain/source.js";
 import { DeepSeekFindingAnalyzer } from "../infrastructure/deepseek-finding-analyzer.js";
 import { HttpSourceFetcher } from "../infrastructure/http-source-fetcher.js";
 import {
+  SqliteChangeAnalysisRepository,
   SqliteChangeRepository,
   SqliteCompetitorRepository,
   SqliteFindingRepository,
+  SqliteResearchRunRepository,
   SqliteSnapshotRepository,
   SqliteSourceRepository,
 } from "../infrastructure/sqlite-repositories.js";
@@ -32,6 +36,8 @@ Usage:
   marketops change list --source <id>
   marketops finding analyze --change <id>
   marketops finding list --competitor <id>
+  marketops research run --competitor <id>
+  marketops research list --competitor <id>
 
 Source types: website, pricing, blog, github, rss
 `;
@@ -53,7 +59,17 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function createFindingAnalyzer(): DeepSeekFindingAnalyzer {
+  return new DeepSeekFindingAnalyzer({
+    apiKey: requireEnv("DEEPSEEK_API_KEY"),
+    model: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
+    baseUrl: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
+  });
+}
+
 async function main(args: string[]): Promise<void> {
+  loadOptionalEnvFile();
+
   if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
     process.stdout.write(HELP);
     return;
@@ -66,6 +82,8 @@ async function main(args: string[]): Promise<void> {
   const snapshots = new SqliteSnapshotRepository(database);
   const changes = new SqliteChangeRepository(database);
   const findings = new SqliteFindingRepository(database);
+  const analyses = new SqliteChangeAnalysisRepository(database);
+  const researchRuns = new SqliteResearchRunRepository(database);
 
   try {
     const [resource, action, ...options] = args;
@@ -159,17 +177,13 @@ async function main(args: string[]): Promise<void> {
 
     if (resource === "finding" && action === "analyze") {
       const changeId = readOption(options, "change");
-      const analyzer = new DeepSeekFindingAnalyzer({
-        apiKey: requireEnv("DEEPSEEK_API_KEY"),
-        model: process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
-        baseUrl: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
-      });
       const result = await analyzeChange(changeId, {
         changeRepository: changes,
         sourceRepository: sources,
         competitorRepository: competitors,
         findingRepository: findings,
-        analyzer,
+        changeAnalysisRepository: analyses,
+        analyzer: createFindingAnalyzer(),
       });
 
       if (result.status === "irrelevant") {
@@ -193,6 +207,43 @@ async function main(args: string[]): Promise<void> {
           `${finding.id}\t${finding.changeId}\t${finding.type}\t${finding.severity}\t${finding.confidence}\t${finding.createdAt.toISOString()}\n`,
         );
         process.stdout.write(`${finding.summary}\n${finding.impact}\n`);
+      }
+      return;
+    }
+
+    if (resource === "research" && action === "run") {
+      const competitorId = readOption(options, "competitor");
+      const result = await runResearch(competitorId, {
+        competitorRepository: competitors,
+        sourceRepository: sources,
+        snapshotRepository: snapshots,
+        changeRepository: changes,
+        findingRepository: findings,
+        changeAnalysisRepository: analyses,
+        researchRunRepository: researchRuns,
+        fetcher: new HttpSourceFetcher(),
+        analyzer: createFindingAnalyzer(),
+      });
+
+      process.stdout.write(`${result.run.id}\t${result.run.status}\n`);
+      process.stdout.write(`snapshots_created\t${result.snapshotsCreated}\n`);
+      process.stdout.write(`snapshots_unchanged\t${result.snapshotsUnchanged}\n`);
+      process.stdout.write(`changes_created\t${result.changesCreated}\n`);
+      process.stdout.write(`findings_created\t${result.findingsCreated}\n`);
+      process.stdout.write(`findings_existing\t${result.findingsExisting}\n`);
+      process.stdout.write(`irrelevant\t${result.irrelevant}\n`);
+      for (const failure of result.failures) {
+        process.stdout.write(`failure\t${failure.sourceId}\t${failure.message}\n`);
+      }
+      return;
+    }
+
+    if (resource === "research" && action === "list") {
+      const competitorId = readOption(options, "competitor");
+      for (const run of researchRuns.listByCompetitor(competitorId)) {
+        process.stdout.write(
+          `${run.id}\t${run.status}\t${run.startedAt?.toISOString() ?? "-"}\t${run.completedAt?.toISOString() ?? "-"}\n`,
+        );
       }
       return;
     }

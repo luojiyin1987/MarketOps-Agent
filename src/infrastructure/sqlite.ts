@@ -69,6 +69,34 @@ CREATE TABLE IF NOT EXISTS findings (
 
 CREATE INDEX IF NOT EXISTS idx_findings_competitor_created_at
   ON findings(competitor_id, created_at, id);
+
+CREATE TABLE IF NOT EXISTS change_analyses (
+  change_id TEXT PRIMARY KEY,
+  relevant INTEGER NOT NULL CHECK (relevant IN (0, 1)),
+  reason TEXT,
+  confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+  analyzed_at TEXT NOT NULL,
+  FOREIGN KEY (change_id) REFERENCES changes(id) ON DELETE CASCADE,
+  CHECK (
+    (relevant = 1 AND reason IS NULL) OR
+    (relevant = 0 AND reason IS NOT NULL AND length(reason) > 0)
+  )
+);
+
+CREATE TABLE IF NOT EXISTS research_runs (
+  id TEXT PRIMARY KEY,
+  competitor_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (
+    status IN ('pending', 'running', 'succeeded', 'partial', 'failed', 'cancelled')
+  ),
+  started_at TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (competitor_id) REFERENCES competitors(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_runs_competitor_created_at
+  ON research_runs(competitor_id, created_at, id);
 `;
 
 export function openSqliteDatabase(path = "marketops.db"): SqliteDatabase {

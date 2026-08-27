@@ -1,4 +1,12 @@
-import type { Change, Competitor, Finding, Snapshot, Source } from "../domain/index.js";
+import type {
+  Change,
+  ChangeAnalysis,
+  Competitor,
+  Finding,
+  ResearchRun,
+  Snapshot,
+  Source,
+} from "../domain/index.js";
 
 export interface CompetitorRepository {
   create(competitor: Competitor): void;
@@ -29,4 +37,16 @@ export interface FindingRepository {
   create(finding: Finding): void;
   findByChangeId(changeId: string): Finding | undefined;
   listByCompetitor(competitorId: string): Finding[];
+}
+
+export interface ChangeAnalysisRepository {
+  create(analysis: ChangeAnalysis): void;
+  findByChangeId(changeId: string): ChangeAnalysis | undefined;
+}
+
+export interface ResearchRunRepository {
+  create(run: ResearchRun): void;
+  update(run: ResearchRun): void;
+  findById(id: string): ResearchRun | undefined;
+  listByCompetitor(competitorId: string): ResearchRun[];
 }
